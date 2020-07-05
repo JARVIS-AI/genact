@@ -1,6 +1,6 @@
-use rand::prelude::*;
 use crate::parse_args::AppConfig;
-use crate::utils::{dprint, csleep};
+use crate::utils::{csleep, dprint};
+use rand::prelude::*;
 use yansi::Paint;
 
 use crate::SIMCITY_LIST;
@@ -31,9 +31,9 @@ pub fn run(appconfig: &AppConfig) {
         // Choose a status/resolution per "task"
         let resolution_id = 1 + rng.gen::<u8>() % 100;
         let mut resolution = match resolution_id {
-            1...4 => "FAIL",
-            5...9 => "YES",
-            10...14 => "SUCCESS",
+            1..=4 => "FAIL",
+            5..=9 => "YES",
+            10..=14 => "SUCCESS",
             _ => "OK",
         };
 
@@ -80,17 +80,20 @@ pub fn run(appconfig: &AppConfig) {
         } else {
             let color_id = 1 + rng.gen::<u8>() % 20;
             match color_id {
-                1...2 => Paint::red,
-                3...4 => Paint::green,
-                5...6 => Paint::cyan,
-                7...10 => Paint::blue,
+                1..=2 => Paint::red,
+                3..=4 => Paint::green,
+                5..=6 => Paint::cyan,
+                7..=10 => Paint::blue,
                 _ => Paint::white,
             }
         };
 
         // End of loop, the line has been removed, conclude the status
         dprint(checked_checkbox, 10);
-        dprint(color_func(format!("{}... {}", simcity, resolution)).to_string(), 0);
+        dprint(
+            color_func(format!("{}... {}", simcity, resolution)).to_string(),
+            0,
+        );
 
         if appconfig.should_exit() {
             dprint("\nALL DONE\n", 0);
