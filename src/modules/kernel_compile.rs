@@ -1,10 +1,12 @@
-/// Module that pretends to build a Linux kernel
+//! Pretend to build a Linux kernel
+use async_trait::async_trait;
 use rand::prelude::*;
 use regex::Regex;
 
-use crate::parse_args::AppConfig;
-use crate::utils::csleep;
-use crate::CFILES_LIST;
+use crate::args::AppConfig;
+use crate::data::CFILES_LIST;
+use crate::io::{csleep, newline, print};
+use crate::modules::Module;
 
 /// Generate a build step for a header file
 fn gen_header(arch: &str, rng: &mut ThreadRng) -> String {
@@ -24,11 +26,11 @@ fn gen_header(arch: &str, rng: &mut ThreadRng) -> String {
     if file.starts_with("arch") {
         let re = Regex::new(r"arch/([a-z0-9_])+/").unwrap();
         file = re
-            .replace(&file, format!("arch/{}/", arch).as_str())
+            .replace(&file, format!("arch/{arch}/").as_str())
             .into_owned();
     }
 
-    format!("  {} {}", cmd, file)
+    format!("  {cmd} {file}")
 }
 
 /// Generate a build step for an object file
@@ -49,11 +51,11 @@ fn gen_object(arch: &str, rng: &mut ThreadRng) -> String {
     if file.starts_with("arch") {
         let re = Regex::new(r"arch/([a-z0-9_])+/").unwrap();
         file = re
-            .replace(&file, format!("arch/{}/", arch).as_str())
+            .replace(&file, format!("arch/{arch}/").as_str())
             .into_owned();
     }
 
-    format!("  {} {}", cmd, file)
+    format!("  {cmd} {file}")
 }
 
 /// Generate a 'special' build step
@@ -89,7 +91,7 @@ fn gen_special(arch: &str, rng: &mut ThreadRng) -> String {
     let special = SPECIALS.choose(rng).unwrap_or(&"").to_string();
     let special = special.replace("ARCH", arch);
 
-    format!("  {}", special)
+    format!("  {special}")
 }
 
 /// Generates a line from `make` output
@@ -103,77 +105,96 @@ fn gen_line(arch: &str, rng: &mut ThreadRng) -> String {
     }
 }
 
-pub fn run(appconfig: &AppConfig) {
-    let mut rng = thread_rng();
-    let num_lines = rng.gen_range(50, 500);
+pub struct KernelCompile;
 
-    const ARCHES: &[&str] = &[
-        "alpha",
-        "arc",
-        "arm",
-        "arm64",
-        "blackfin",
-        "c6x",
-        "cris",
-        "frv",
-        "h8300",
-        "hexagon",
-        "ia64",
-        "m32r",
-        "m68k",
-        "metag",
-        "microblaze",
-        "mips",
-        "mn10300",
-        "nios2",
-        "openrisc",
-        "parisc",
-        "powerpc",
-        "s390",
-        "score",
-        "sh",
-        "sparc",
-        "tile",
-        "um",
-        "unicore32",
-        "x86",
-        "xtensa",
-    ];
-
-    let arch = ARCHES.choose(&mut rng).unwrap_or(&"x86");
-
-    for _ in 1..num_lines {
-        let line = gen_line(arch, &mut rng);
-        let sleep_length = rng.gen_range(10, 1000);
-
-        println!("{}", line);
-        csleep(sleep_length);
-
-        if appconfig.should_exit() {
-            return;
-        }
+#[async_trait(?Send)]
+impl Module for KernelCompile {
+    fn name(&self) -> &'static str {
+        "kernel_compile"
     }
 
-    println!("BUILD   arch/{}/boot/bzImage", arch);
+    fn signature(&self) -> String {
+        "sudo make install".to_string()
+    }
 
-    println!();
+    async fn run(&self, appconfig: &AppConfig) {
+        let mut rng = thread_rng();
+        let num_lines = rng.gen_range(50..500);
 
-    let bytes: u32 = rng.gen_range(9000, 1_000_000);
-    let padded_bytes: u32 = rng.gen_range(bytes, 1_100_000);
+        const ARCHES: &[&str] = &[
+            "alpha",
+            "arc",
+            "arm",
+            "arm64",
+            "blackfin",
+            "c6x",
+            "cris",
+            "frv",
+            "h8300",
+            "hexagon",
+            "ia64",
+            "m32r",
+            "m68k",
+            "metag",
+            "microblaze",
+            "mips",
+            "mn10300",
+            "nios2",
+            "openrisc",
+            "parisc",
+            "powerpc",
+            "s390",
+            "score",
+            "sh",
+            "sparc",
+            "tile",
+            "um",
+            "unicore32",
+            "x86",
+            "xtensa",
+        ];
 
-    println!(
-        "Setup is {} bytes (padded to {} bytes).",
-        bytes, padded_bytes
-    );
+        let arch = ARCHES.choose(&mut rng).unwrap_or(&"x86");
 
-    let system: u32 = rng.gen_range(300, 3000);
-    println!("System is {} kB", system);
+        for _ in 1..num_lines {
+            let line = gen_line(arch, &mut rng);
+            let sleep_length = rng.gen_range(10..1000);
 
-    let crc: u32 = rng.gen_range(0x1000_0000, 0xffff_ffff);
+            print(line).await;
+            newline().await;
+            csleep(sleep_length).await;
 
-    println!("CRC {:x}", crc);
+            if appconfig.should_exit() {
+                return;
+            }
+        }
 
-    println!("Kernel: arch/{}/boot/bzImage is ready (#1)", arch);
+        print(format!("BUILD   arch/{arch}/boot/bzImage")).await;
+        newline().await;
 
-    println!();
+        newline().await;
+
+        let bytes: u32 = rng.gen_range(9000..1_000_000);
+        let padded_bytes: u32 = rng.gen_range(bytes..1_100_000);
+
+        print(format!(
+            "Setup is {bytes} bytes (padded to {padded_bytes} bytes)."
+        ))
+        .await;
+        newline().await;
+
+        let system: u32 = rng.gen_range(300..3000);
+        print(format!("System is {system} kB")).await;
+        newline().await;
+
+        let crc: u32 = rng.gen_range(0x1000_0000..0xffff_ffff);
+
+        print(format!("CRC {crc:x}")).await;
+        newline().await;
+
+        print(format!("Kernel: arch/{arch}/boot/bzImage is ready (#1)")).await;
+        newline().await;
+
+        newline().await;
+    }
 }

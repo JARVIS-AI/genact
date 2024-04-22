@@ -1,164 +1,64 @@
-/// genact - A nonsense activity generator
-///
-/// Main module.
-#[cfg(not(target_os = "emscripten"))]
-#[macro_use]
-extern crate clap;
+#[cfg(not(target_arch = "wasm32"))]
+use anyhow::Result;
 
-#[cfg(not(target_os = "emscripten"))]
-extern crate ctrlc;
+use genact::args::parse_args;
+use genact::{run, INSTANT_PRINT_LINES, SPEED_FACTOR};
 
-#[cfg(target_os = "emscripten")]
-extern crate emscripten_sys;
+use std::sync::atomic::Ordering;
 
-#[cfg(target_os = "emscripten")]
-#[macro_use]
-extern crate stdweb;
+#[cfg(not(target_arch = "wasm32"))]
+use genact::exit_handler;
 
-extern crate chrono;
-extern crate humantime;
-#[macro_use]
-extern crate lazy_static;
-extern crate pbr;
-extern crate rand;
-extern crate regex;
-extern crate url;
-extern crate yansi;
-#[macro_use]
-extern crate fake;
+#[cfg(not(target_arch = "wasm32"))]
+#[async_std::main]
+async fn main() -> Result<()> {
+    use clap::CommandFactory;
+    use genact::args::AppConfig;
 
-mod bootlog;
-mod botnet;
-mod cargo;
-mod cc;
-mod composer;
-mod cryptomining;
-mod docker;
-mod download;
-mod kernel_compile;
-mod memdump;
-mod mkinitcpio;
-mod simcity;
-mod weblog;
+    let appconfig = parse_args();
 
-mod parse_args;
-mod utils;
+    if let Some(shell) = appconfig.print_completions {
+        let mut clap_app = AppConfig::command();
+        let app_name = clap_app.get_name().to_string();
+        clap_complete::generate(shell, &mut clap_app, app_name, &mut std::io::stdout());
+        return Ok(());
+    }
 
-use crate::parse_args::parse_args;
-use rand::prelude::*;
-use yansi::Paint;
+    if appconfig.print_manpage {
+        let clap_app = AppConfig::command();
+        let man = clap_mangen::Man::new(clap_app);
+        man.render(&mut std::io::stdout())?;
+        return Ok(());
+    }
 
-static BOOTLOG: &str = include_str!("../data/bootlog.txt");
-static CFILES: &str = include_str!("../data/cfiles.txt");
-static PACKAGES: &str = include_str!("../data/packages.txt");
-static COMPOSERS: &str = include_str!("../data/composer.txt");
-static SIMCITY: &str = include_str!("../data/simcity.txt");
-static BOOT_HOOKS: &str = include_str!("../data/boot_hooks.txt");
-static OS_RELEASES: &str = include_str!("../data/os_releases.txt");
-static DOCKER_PACKAGES: &str = include_str!("../data/docker_packages.txt");
-static DOCKER_TAGS: &str = include_str!("../data/docker_tags.txt");
+    *SPEED_FACTOR.lock().await = appconfig.speed_factor;
+    INSTANT_PRINT_LINES.store(appconfig.instant_print_lines, Ordering::SeqCst);
 
-lazy_static! {
-    static ref BOOTLOG_LIST: Vec<&'static str> = BOOTLOG.lines().collect();
-    static ref CFILES_LIST: Vec<&'static str> = CFILES.lines().collect();
-    static ref PACKAGES_LIST: Vec<&'static str> = PACKAGES.lines().collect();
-    static ref COMPOSERS_LIST: Vec<&'static str> = COMPOSERS.lines().collect();
-    static ref SIMCITY_LIST: Vec<&'static str> = SIMCITY.lines().collect();
-    static ref BOOT_HOOKS_LIST: Vec<&'static str> = BOOT_HOOKS.lines().collect();
-    static ref OS_RELEASES_LIST: Vec<&'static str> = OS_RELEASES.lines().collect();
-    static ref DOCKER_PACKAGES_LIST: Vec<&'static str> = DOCKER_PACKAGES.lines().collect();
-    static ref DOCKER_TAGS_LIST: Vec<&'static str> = DOCKER_TAGS.lines().collect();
+    if appconfig.list_modules_and_exit {
+        println!("Available modules:");
+        for module in genact::modules::ALL_MODULES.keys() {
+            println!("  {module}");
+        }
+        std::process::exit(0);
+    }
+
+    ctrlc::set_handler(exit_handler)?;
+
+    run(appconfig).await;
+
+    Ok(())
 }
 
-static EXTENSIONS_LIST: &'static [&str] = &[
-    "gif", "webm", "mp4", "html", "php", "md", "png", "jpg", "ogg", "mp3", "flac", "iso", "zip",
-    "rar", "tar.gz", "tar.bz2", "tar.xz", "deb", "rpm", "exe",
-];
+// Called when the wasm module is instantiated
+#[cfg(target_arch = "wasm32")]
+#[async_std::main]
+async fn main() {
+    use std::panic;
+    panic::set_hook(Box::new(console_error_panic_hook::hook));
 
-static COMPRESSION_ALGORITHMS_LIST: &'static [&str] =
-    &["gzip", "bzip2", "lzma", "xz", "lzop", "lz4"];
+    let appconfig = parse_args();
+    *SPEED_FACTOR.lock().await = appconfig.speed_factor;
+    INSTANT_PRINT_LINES.store(appconfig.instant_print_lines, Ordering::SeqCst);
 
-#[cfg(not(target_os = "emscripten"))]
-use std::sync::atomic::AtomicBool;
-
-#[cfg(not(target_os = "emscripten"))]
-lazy_static! {
-    static ref CTRLC_PRESSED: AtomicBool = AtomicBool::new(false);
-}
-
-fn main() {
-    Paint::enable_windows_ascii();
-
-    let all_modules = [
-        "bootlog",
-        "botnet",
-        "cargo",
-        "cc",
-        "composer",
-        "cryptomining",
-        "simcity",
-        "download",
-        "docker",
-        "memdump",
-        "mkinitcpio",
-        "kernel_compile",
-        "weblog",
-        // "bruteforce",
-        // "initialize",
-        // "heartbeat",
-    ];
-
-    #[cfg(target_os = "emscripten")]
-    {
-        stdweb::initialize();
-    }
-
-    let appconfig = parse_args(&all_modules);
-
-    #[cfg(not(target_os = "emscripten"))]
-    {
-        use std::process;
-        if appconfig.list_modules_and_exit {
-            println!("Available modules:");
-            for module in &all_modules {
-                println!("  {}", module);
-            }
-            process::exit(0);
-        }
-
-        use std::sync::atomic::Ordering;
-        ctrlc::set_handler(move || {
-            CTRLC_PRESSED.store(true, Ordering::SeqCst);
-        })
-        .expect("Error setting Ctrl-C handler");
-    }
-
-    let mut rng = thread_rng();
-    loop {
-        let choice: &str = appconfig.modules.choose(&mut rng).unwrap();
-        match choice {
-            "bootlog" => bootlog::run(&appconfig),
-            "botnet" => botnet::run(&appconfig),
-            "cargo" => cargo::run(&appconfig),
-            "cryptomining" => cryptomining::run(&appconfig),
-            "simcity" => simcity::run(&appconfig),
-            "mkinitcpio" => mkinitcpio::run(&appconfig),
-            "cc" => cc::run(&appconfig),
-            "download" => download::run(&appconfig),
-            "docker" => docker::run(&appconfig),
-            "memdump" => memdump::run(&appconfig),
-            "composer" => composer::run(&appconfig),
-            "kernel_compile" => kernel_compile::run(&appconfig),
-            "weblog" => weblog::run(&appconfig),
-            _ => panic!("Unknown module!"),
-        }
-        #[cfg(not(target_os = "emscripten"))]
-        {
-            use std::process;
-            if appconfig.should_exit() {
-                println!("Saving work to disk...");
-                process::exit(0);
-            }
-        }
-    }
+    run(appconfig).await;
 }

@@ -1,37 +1,53 @@
 [package]
 name = "genact"
 description = "A nonsense activity generator"
-version = "0.7.0"
+version = "1.4.2"
 repository = "https://github.com/svenstaro/genact"
 authors = ["Sven-Hendrik Haase <svenstaro@gmail.com>"]
 license = "MIT"
 readme = "README.md"
 keywords = ["fake", "nonsense", "useless"]
 categories = ["command-line-utilities", "command-line-interface"]
-edition = "2018"
+edition = "2021"
 
-[badges]
-travis-ci = { repository = "svenstaro/genact", branch = "master" }
-maintenance = { status = "actively-developed" }
+[profile.release]
+lto = true
+opt-level = 'z'
+codegen-units = 1
+
+# We can't set strip = true because of https://github.com/rust-lang/rust/issues/93294
+strip = "debuginfo"
 
 [dependencies]
-pbr = "1.0"
-yansi = "0.5"
-rand = "0.7.0"
-chrono = "0.4"
-url = "2.1"
+anyhow = "1"
+async-std = { version = "1", features = ["attributes"] }
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["clock", "wasmbind"], default-features = false }
+fake = { version = "2.8", features = ["chrono"] }
+colorgrad = "0.6.2"
+getrandom = { version = "0.2", features = ["js"] }
+humansize = "2"
+humantime = "2"
+instant = { version = "0.1", features = ["now", "wasm-bindgen"] }
 lazy_static = "1.4"
-humantime = "1.3"
-regex = "1.3"
-fake = "1.3.0"
+progress_string = "0.2"
+rand = "0.8"
+rand_distr = "0.4"
+regex = "1.8"
+sha2 = "0.10.6"
+yansi = "1"
 
-[target.'cfg(not(target_os = "emscripten"))'.dependencies]
-clap = "2.33"
-ctrlc = "3.1"
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+clap = { version = "4.4", features = ["derive", "cargo", "wrap_help"] }
+clap_complete = "4"
+clap_mangen = "0.2"
+ctrlc = { version = "3.4", features = ["termination"] }
+terminal_size = "0.3"
 
-[target.'cfg(target_os = "emscripten")'.dependencies]
-emscripten-sys = "0.3"
-stdweb = "0.4"
-
-[profile.dev]
-debug = 1  # Required due to emscripten with emterpretify
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1"
+js-sys = "0.3"
+url = "2.4"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Location", "console"] }
